@@ -1,0 +1,36 @@
+# Proof of all-or-nothing: the SAME fleet shape, but it asks for more than the quota.
+# 4 x 1 core = 4 cores requested vs demo-cq's 2-core nominalQuota. Kueue will NOT admit
+# a partial fleet: the Workload stays Pending and ZERO pods are created (the Job stays
+# suspended) until capacity frees up. No stranded driver, no half-built bridge.
+#   oc apply -f 03-gang-gated-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fleet-toobig
+  namespace: kueue-demo
+  labels:
+    app.kubernetes.io/name: fleet-toobig
+    kueue.x-k8s.io/queue-name: demo-lq
+spec:
+  completionMode: Indexed
+  completions: 4
+  parallelism: 4
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fleet-toobig
+    spec:
+      # No securityContext: OpenShift's restricted-v2 SCC auto-applies non-root + seccomp +
+      # dropped caps (never admitted anyway — this fleet exceeds quota).
+      restartPolicy: Never
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          command: ["/bin/sh", "-c", "sleep 300"]
+          resources:
+            requests: { cpu: "1", memory: 128Mi }   # 4 x 1 = 4 cores > 2-core quota
+            limits:   { cpu: "1", memory: 256Mi }

@@ -1,0 +1,44 @@
+# The fleet: a core batch/v1 Indexed Job = 4 pods under ONE owner -> ONE logical workload.
+# It opts into Kueue with the queue-name label; Kueue admits all 4 pods together (gang)
+# against demo-cq, then the plain OpenShift default-scheduler places them.
+#   oc apply -f 02-example-job.yaml
+# Fits the 2-core quota (4 x 250m = 1000m) -> admitted immediately.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fleet-demo
+  namespace: kueue-demo
+  labels:
+    app.kubernetes.io/name: fleet-demo
+    app.kubernetes.io/component: worker
+    kueue.x-k8s.io/queue-name: demo-lq      # <-- opt in to Kueue (QueueName label policy)
+spec:
+  completionMode: Indexed          # stable per-pod index (role-like identity)
+  completions: 4
+  parallelism: 4                   # 4 pods run together -> the gang
+  backoffLimit: 0
+  activeDeadlineSeconds: 900       # hard safety bound on a shared cluster
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fleet-demo
+        app.kubernetes.io/component: worker
+    spec:
+      # No securityContext needed on OpenShift: the restricted-v2 SCC auto-applies a namespace
+      # UID, runAsNonRoot, seccompProfile=RuntimeDefault and drops all caps. (Do NOT pin
+      # runAsUser here — a fixed UID outside the namespace's assigned range is rejected by the SCC.)
+      restartPolicy: Never
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          command: ["/bin/sh", "-c", "echo \"worker ${JOB_COMPLETION_INDEX} up\"; sleep 300"]
+          env:
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+          resources:
+            requests: { cpu: "250m", memory: 128Mi }
+            limits:   { cpu: "500m", memory: 256Mi }

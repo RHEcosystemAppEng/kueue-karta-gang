@@ -1,0 +1,37 @@
+# Kueue quota layer (cluster-scoped) — the "one quota line" every fleet is admitted against.
+# Install the Red Hat build of Kueue first (OLM, channel stable-v1.5) and create the
+# Kueue instance CR with the BatchJob integration + QueueName label policy (see the blog
+# Prerequisites). Then apply this:
+#   oc apply -f 01-kueue-queues.yaml
+---
+# A flavor is a named bucket of homogeneous capacity (here: anything in the cluster).
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: default-flavor
+---
+# The ClusterQueue is the quota/cohort: all-or-nothing admission is measured against this.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: demo-cq
+spec:
+  namespaceSelector: {}            # usable from any namespace that has a LocalQueue
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: "2"    # 2 cores total — deliberately small to show gang-gating
+            - name: "memory"
+              nominalQuota: "2Gi"
+---
+# The LocalQueue is the namespace-local handle workloads point at by label.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: demo-lq
+  namespace: kueue-demo
+spec:
+  clusterQueue: demo-cq

@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AGNOSTIC Karta template — group a multi-pod workload as a SINGLE entity.
+#
+# Maps one logical workload (several pod-producing objects) to ONE workload:
+#   ROOT    one API object that carries identity + aggregate status (no ownerRef)
+#   ROLES   N children selected from pods by a COMPONENT label   (label-based ✅)
+#   GANG    co-schedule the chosen roles by a shared GROUP label (label-based ✅)
+# Nothing here is AI-specific — web app + workers, sharded service, data pipeline,
+# HPC job, disaggregated server, etc.
+#
+# Pick ONE shape:
+#   A (default)     one API object represents the whole workload + holds status.
+#   B (group block) group replicated N times; roles have no 1:1 per-group object
+#                   (the LeaderWorkerSet pattern) — see the commented "group" child.
+#   C (pure-label)  delete childComponents AND collapse the podGroups members (below) to a
+#                   single '- componentName: <ROOT_NAME>' grouped by the GROUP label — as in
+#                   karta-job-map.yaml — else the <ROLE_A>/<ROLE_B> gang members are dangling
+#                   refs. Unifies pods by GROUP label alone.
+#                   NOTE: identity still needs a real-GVK root — Karta cannot root on a label.
+#
+# Replace every <PLACEHOLDER>. Register via POST /api/v1/workload-types
+# (name == <ROOT_KIND>, group == <ROOT_GROUP>); do NOT `oc apply` as a bare CR.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: run.ai/v1alpha1
+kind: Karta
+metadata: {}
+spec:
+  optimizationInstructions:
+    gangScheduling:
+      podGroups:
+        - name: service
+          members:
+            # list the roles that must co-schedule; grouped by a shared instance label
+            - componentName: <ROLE_A>              # e.g. decode / leader / driver
+              groupByKeyPaths: ['.metadata.labels["<GROUP_LABEL>"]']   # e.g. app.kubernetes.io/name
+            - componentName: <ROLE_B>              # e.g. prefill / worker / executor
+              groupByKeyPaths: ['.metadata.labels["<GROUP_LABEL>"]']
+  structureDefinition:
+    # ── ROOT: the single object that IS the workload (carries status) ──────────
+    rootComponent:
+      name: <ROOT_NAME>                            # free name, e.g. "widget"
+      kind: { group: <ROOT_GROUP>, version: <ROOT_VERSION>, kind: <ROOT_KIND> }
+      scaleDefinition:
+        replicasPath: ".spec.replicas // 1"
+      statusDefinition:
+        conditionsDefinition:
+          path: .status.conditions
+          typeFieldName: type
+          statusFieldName: status
+          reasonFieldName: reason
+          messageFieldName: message
+        statusMappings:
+          running:
+            - byConditions: [{ status: "True", type: <READY_CONDITION> }]   # e.g. Ready
+          failed:
+            - byConditions: [{ status: "False", type: <READY_CONDITION> }]
+    # ── ROLES: one child per role, selected from pods by a COMPONENT label ─────
+    childComponents:
+      - name: <ROLE_A>
+        kind: { group: apps, version: v1, kind: Deployment }   # or Job/StatefulSet/etc.
+        ownerRef: <ROOT_NAME>
+        podSelector:
+          componentTypeSelector:
+            keyPath: '.metadata.labels["<COMPONENT_LABEL>"]'   # e.g. app.kubernetes.io/component
+            value: <ROLE_A_VALUE>                              # the label value for role A
+        scaleDefinition: { replicasPath: ".spec.replicas // 1" }
+      - name: <ROLE_B>
+        kind: { group: apps, version: v1, kind: Deployment }
+        ownerRef: <ROOT_NAME>
+        podSelector:
+          componentTypeSelector:
+            keyPath: '.metadata.labels["<COMPONENT_LABEL>"]'
+            value: <ROLE_B_VALUE>
+        scaleDefinition: { replicasPath: ".spec.replicas // 1" }
+
+      # ── SHAPE B (optional): a "group" level, replicated N times, no per-group object.
+      #    Uncomment for LeaderWorkerSet-style topologies (per-group index label).
+      # - name: group
+      #   ownerRef: <ROOT_NAME>
+      #   podSelector:
+      #     replicaSelector: { keyPath: '.metadata.labels["<GROUP_INDEX_LABEL>"]' }
+      #   scaleDefinition: { replicasPath: ".spec.<GROUPS_PATH>" }

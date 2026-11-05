@@ -1,0 +1,43 @@
+# Karta map: group all pods of a core batch/v1 Job into ONE workload entity.
+#
+# Root = the Job (identity + status); the Job's pods are grouped into one gang by
+# the controller-set label batch.kubernetes.io/job-name. No roles needed — all
+# pods are the same role — so this is the simplest "N pods -> one entity" shape.
+#
+# REGISTER this as a workload type (do NOT `oc apply` as a bare CR — it is pruned):
+#   name MUST equal the Kind ("Job"); group MUST equal the API group ("batch").
+#   Many gang-aware schedulers already ship a Job map — check
+#   GET /api/v1/workload-types first; register only if absent.
+apiVersion: run.ai/v1alpha1
+kind: Karta
+metadata: {}
+spec:
+  optimizationInstructions:
+    gangScheduling:
+      podGroups:
+        - name: job
+          members:
+            - componentName: job
+              groupByKeyPaths:
+                - '.metadata.labels["batch.kubernetes.io/job-name"]'
+  structureDefinition:
+    rootComponent:
+      name: job
+      kind: { group: batch, version: v1, kind: Job }
+      scaleDefinition:
+        replicasPath: ".spec.parallelism // .spec.completions // 1"
+      statusDefinition:
+        # Jobs expose status.conditions (Complete / Failed) + counts.
+        conditionsDefinition:
+          path: .status.conditions
+          typeFieldName: type
+          statusFieldName: status
+          reasonFieldName: reason
+          messageFieldName: message
+        statusMappings:
+          running:
+            - byConditions: []        # active with no terminal condition => running
+          completed:
+            - byConditions: [{ status: "True", type: Complete }]
+          failed:
+            - byConditions: [{ status: "True", type: Failed }]

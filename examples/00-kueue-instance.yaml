@@ -1,0 +1,16 @@
+# The Kueue instance CR (cluster-singleton) — created AFTER the Red Hat build of Kueue
+# operator is installed. It turns on the Job integration and the opt-in label policy, then
+# the operator rolls out kueue-controller-manager and the kueue.x-k8s.io CRDs.
+#   oc apply -f 00-kueue-instance.yaml
+#   oc wait --for=condition=Available kueue.kueue.openshift.io/cluster --timeout=180s
+apiVersion: kueue.openshift.io/v1
+kind: Kueue
+metadata:
+  name: cluster
+spec:
+  config:
+    integrations:
+      frameworks:
+        - BatchJob            # manage batch/v1 Jobs (Deployment, StatefulSet, RayJob, ... also available)
+    workloadManagement:
+      labelPolicy: QueueName  # only manage objects that carry kueue.x-k8s.io/queue-name
